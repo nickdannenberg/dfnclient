@@ -16,17 +16,18 @@ def submit_request(req,
                    raid,
                    testserver,
                    onlyreqnumber=False,
+                   soap_url=None,
                    **kwargs):
     pin_hashed = sha1(str(pin).encode()).hexdigest()
     if testserver:
-        cl = Client(
-            'https://pki.pca.dfn.de/test-eins-ca/cgi-bin/pub/soap?wsdl=1')
+        soap_url = 'https://pki.pca.dfn.de/test-eins-ca/cgi-bin/pub/soap?wsdl=1'
     else:
-        cl = Client(
-            'https://pki.pca.dfn.de/dfn-ca-global-g2/cgi-bin/pub/soap?wsdl=1')
+        if not(soap_url):
+            soap_url = 'https://pki.pca.dfn.de/dfn-ca-global-g2/cgi-bin/pub/soap?wsdl=1'
+    cl = Client(soap_url)
     alt_type = cl.factory.create('ArrayOfString')
     alt_type._arrayType = "ns0:string[1]"
-    alt_type.item = ['DNS:{}'.format(url) for url in altnames]
+    alt_type.item = altnames
     req_number = cl.service.newRequest(
         RaID=raid,
         PKCS10=req,  # Certificate Signing Request
