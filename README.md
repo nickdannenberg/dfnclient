@@ -11,7 +11,9 @@ Options:
   -h, --help  Show this message and exit.
 
 Commands:
-  create           Create a new certificate and signing request
-  csr              Generate a certificate for an existing certificate.
-  generate_config  Prints an example config
+  config  Creates or edits the default config file
+  create  Create a new certificate and signing request
+  csr     Generate a certificate for an existing certificate (for FQDN with...
+  submit  (Re)submit an existing certificate request (stored in CSR)
+
 ```

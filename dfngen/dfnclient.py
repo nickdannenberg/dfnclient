@@ -174,6 +174,49 @@ def gen_existing(fqdn, pin, applicant, mail, config, path, additional, requestnu
         print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
 
 
+@cli.command("submit", help="(Re)submit an existing certificate request (stored in CSR)")
+@click.argument("csr", type=click.Path(exists=True))
+@click.option("--applicant",
+              type=str,
+              help="Name of the applicant, defaults to value in config")
+@click.option("--mail",
+              type=str,
+              help="Applicant email, defaults to value in config")
+@click.option(
+    "--pin",
+    "-p",
+    prompt=True,
+    hide_input=True,
+    confirmation_prompt=True,
+    type=str,
+    help="Applicant code pin, will be prompted if not provided",
+)
+@click.option(
+    "-c",
+    "--config",
+    type=click.Path(),
+    help="Path to config",
+    # show_default=True,
+    default=Path(click.get_app_dir(APP_NAME)) / "config.json",
+)
+@click.option(
+    "--only-rq",
+    "-r",
+    "requestnumber",
+    default=False,
+    is_flag=True,
+    help="Only print the request number and do not generate a pdf",
+)
+@click.option(
+    "--cert-profile",
+    type=str,
+    help="Certificate profile, e.g. Web Server, LDAP Server"
+)
+def submit_csr(csr, pin, applicant, mail, config, requestnumber, cert_profile):
+    (fqdn, additional, req) = openssl.data_from_csr(csr)
+    (fqdn, pin, conf) = _prepare_common_args(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile)
+    conf['altnames'] = additional
+
     soap.submit_request(req, onlyreqnumber=requestnumber, **conf)
     if not requestnumber:
         print("Generated pdf at:", colored("{}.pdf".format(fqdn)))

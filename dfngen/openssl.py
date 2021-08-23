@@ -78,3 +78,18 @@ def generate_csr(key, fqdn, subject, altnames=None):
     with open('{}.req'.format(fqdn), 'wb') as f:
         f.write(csr.public_bytes(serialization.Encoding.PEM))
     return csr.public_bytes(serialization.Encoding.PEM).decode()
+
+# extract data from PKCS10 CSR
+def data_from_csr(csr_path):
+    "Read fqdn and altnames from CSR"
+    with open(csr_path, 'rb') as f:
+         request = x509.load_pem_x509_csr(f.read(), default_backend())
+         if not(request):
+             raise Exception('could not read CSR')
+         fqdn = request.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+         ext_altname = request.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+         altnames = [f'DNS:{n}' for n in ext_altname.get_values_for_type(x509.DNSName)]
+         altnames.extend( [f'IP:{n}' for n in ext_altname.get_values_for_type(x509.IPAddress)])
+
+         return (fqdn, altnames, request.public_bytes(serialization.Encoding.PEM).decode())
+
