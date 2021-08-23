@@ -8,6 +8,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 
 from dfngen import openssl, soap
+import re
 
 APP_NAME = "dfnclient"
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
@@ -47,6 +48,9 @@ def cli():
 @click.option("--applicant",
               type=str,
               help="Name of the applicant, defaults to value in config")
+@click.option("--mail",
+              type=str,
+              help="Applicant email, defaults to value in config")
 @click.option(
     "-c",
     "--config",
@@ -70,45 +74,26 @@ def cli():
     is_flag=True,
     help="Only print the request number and do not generate a pdf",
 )
-def create_cert(fqdn, pin, applicant, config, additional, requestnumber):
-    conf = parse_config(config)
-    check_conf(conf)
-    if not "fqdn" in conf and fqdn is None:
-        fqdn = click.prompt("Primary FQDN", type=str)
-    if not "pin" in conf:
-        pin = click.prompt("PIN for DFN request",
-                           hide_input=True,
-                           confirmation_prompt=True,
-                           type=int)
-    print("Using config: ", colored("{}".format(config), "blue"))
-    if not "applicant" in conf:
-        if applicant:
-            conf["applicant"] = applicant
-        else:
-            conf["applicant"] = click.prompt(
-                "No Applicant provided, please enter")
-    conf["fqdn"] = fqdn
-    conf["subject"]["cn"] = conf["subject"]["cn"].format(**conf)
-    conf["altnames"] = additional
+@click.option(
+    "--cert-profile",
+    type=str,
+    help="Certificate profile, e.g. Web Server, LDAP Server"
+)
+def create_cert(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile):
+    (fqdn, pin, conf) = _gen_csr_common(fqdn, pin, applicant, config, additional, requestnumber, cert_profile)
     if conf["use_password"]:
         conf["password"] = click.prompt(
             colored("Enter a certificate password", "yellow"),
             hide_input=True,
             confirmation_prompt=True,
         )
-    print("Generating certificate with the following values:\n")
-    for key, value in conf.items():
-        cprint("{}: {}".format(key, value), "yellow")
-    click.confirm("Are these values correct?", default=True, abort=True)
-    print("Generating certificate")
-    if additional:
-        req = openssl.gen_csr_with_new_cert(conf["fqdn"], conf["subject"],
-                                            conf["password"], conf["altnames"])
     else:
-        req = openssl.gen_csr_with_new_cert(conf["fqdn"], conf["subject"],
-                                            conf["password"])
-    conf["pin"] = pin
-    conf["profile"] = "Web Server"
+        conf["password"] = None
+
+    print("Generating private key and certificate signing request")
+    req = openssl.gen_csr_with_new_cert(conf["fqdn"], conf["subject"],
+                                        conf["password"], additional)
+
     soap.submit_request(req, onlyreqnumber=requestnumber, **conf)
     if not requestnumber:
         print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
@@ -116,12 +101,15 @@ def create_cert(fqdn, pin, applicant, config, additional, requestnumber):
         f.write(json.dumps(conf, sort_keys=True, indent=4))
 
 
-@cli.command("csr", help="Generate a certificate for an existing certificate.")
+@cli.command("csr", help="Generate a certificate for an existing certificate (for FQDN with key stored in PATH).")
 @click.argument("fqdn")
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--applicant",
               type=str,
               help="Name of the applicant, defaults to value in config")
+@click.option("--mail",
+              type=str,
+              help="Applicant email, defaults to value in config")
 @click.option(
     "--pin",
     "-p",
@@ -154,23 +142,14 @@ def create_cert(fqdn, pin, applicant, config, additional, requestnumber):
     is_flag=True,
     help="Only print the request number and do not generate a pdf",
 )
-def gen_existing(fqdn, pin, applicant, config, path, additional, requestnumber):
-    print("Using config: ", colored("{}".format(config), "blue"))
-    conf = parse_config(config)
-    check_conf(conf)
-    if not "applicant" in conf:
-        if applicant:
-            conf["applicant"] = applicant
-        else:
-            conf["applicant"] = click.prompt(
-                "No Applicant provided, please enter")
-    conf["fqdn"] = fqdn
-    conf["subject"]["cn"] = conf["subject"]["cn"].format(**conf)
-    conf["altnames"] = additional
-    print("Generating certificate signing request with the following values:\n")
-    for key, value in conf.items():
-        cprint("{}: {}".format(key, value), "yellow")
-    click.confirm("Are these values correct?", default=True, abort=True)
+@click.option(
+    "--cert-profile",
+    type=str,
+    help="Certificate profile, e.g. Web Server, LDAP Server"
+)
+def gen_existing(fqdn, pin, applicant, mail, config, path, additional, requestnumber, cert_profile):
+    (fqdn, pin, conf) = _gen_csr_common(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile)
+
     print("Checking key")
     with open(path, "rb") as f:
         try:
@@ -189,8 +168,12 @@ def gen_existing(fqdn, pin, applicant, config, path, additional, requestnumber):
         password=conf["password"],
         additional=additional,
     )
-    conf["pin"] = pin
-    conf["profile"] = "Web Server"
+
+    soap.submit_request(req, onlyreqnumber=requestnumber, **conf)
+    if not requestnumber:
+        print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
+
+
     soap.submit_request(req, onlyreqnumber=requestnumber, **conf)
     if not requestnumber:
         print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
@@ -203,6 +186,58 @@ def create_config():
 
 
 # Helper Methods
+def _prepare_common_args(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile):
+    "Common parsing/preparation code for all commands"
+    print("Using config: ", colored("{}".format(config), "blue"))
+    conf = parse_config(config)
+    check_conf(conf)
+    if not "fqdn" in conf and fqdn is None:
+        fqdn = click.prompt("Primary FQDN", type=str)
+    if not "pin" in conf and pin is None:
+        pin = click.prompt("PIN for DFN request",
+                           hide_input=True,
+                           confirmation_prompt=True,
+                           type=int)
+    if not "applicant" in conf:
+        if applicant:
+            conf["applicant"] = applicant
+        else:
+            conf["applicant"] = click.prompt(
+                "No Applicant name provided, please enter")
+    if not "mail" in conf:
+        if mail:
+            conf["mail"] = mail
+        else:
+            conf["mail"] = click.prompt(
+                "No Applicant mail provided, please enter")
+    conf["fqdn"] = fqdn
+    conf["pin"] = pin
+    if cert_profile:
+        conf["profile"] = cert_profile
+    elif not "profile" in conf:
+        conf["profile"] = "Web Server"
+
+    return (fqdn, pin, conf)
+
+def _gen_csr_common(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile):
+    "Common functionality for preparing/generating a CSR"
+    (fqdn, pin, conf) = _prepare_common_args(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile)
+    conf["subject"]["cn"] = conf["subject"]["cn"].format(**conf)
+    conf["altnames"] = []
+    for alt in additional:
+        if re.match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', alt) or re.match('^[0-9a-fA-F:]+', alt):
+            conf['altnames'].append('IP:{}'.format(alt))
+        else:
+            conf['altnames'].append('DNS:{}'.format(alt))
+
+    print("Generating certificate signing request with the following values:\n")
+    for key, value in conf.items():
+        if key in ('pin','password'):
+            pass
+        cprint("{}: {}".format(key, value), "yellow")
+    click.confirm("Are these values correct?", default=True, abort=True)
+
+    return (fqdn, pin, conf)
 
 
 def config_edit():

@@ -8,6 +8,8 @@ from cryptography import x509
 from cryptography.x509.oid import NameOID
 from termcolor import cprint
 
+import re
+import ipaddress
 
 def gen_csr_with_new_cert(fqdn, subject, password, altnames=None):
     key = rsa.generate_private_key(public_exponent=65537,
@@ -49,19 +51,27 @@ def gen_csr_with_existing_cert(key_path,
 
 
 def generate_csr(key, fqdn, subject, altnames=None):
-    csr = x509.CertificateSigningRequestBuilder().subject_name(
-        x509.Name([
-            x509.NameAttribute(NameOID.COUNTRY_NAME, subject['country']),
-            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME,
-                               subject['state']),
-            x509.NameAttribute(NameOID.LOCALITY_NAME, subject['city']),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, subject['org']),
-            x509.NameAttribute(NameOID.COMMON_NAME, subject['cn']),
-        ]))
+    subj = []
+    subj.append(x509.NameAttribute(NameOID.COUNTRY_NAME, subject['country']))
+    subj.append(x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, subject['state']))
+    subj.append(x509.NameAttribute(NameOID.LOCALITY_NAME, subject['city']))
+    subj.append(x509.NameAttribute(NameOID.ORGANIZATION_NAME, subject['org']))
+    if 'unit' in subject:
+        subj.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, subject['unit']))
+    subj.append(x509.NameAttribute(NameOID.COMMON_NAME, subject['cn']))
+
+    csr = x509.CertificateSigningRequestBuilder().subject_name(x509.Name(subj))
     if altnames != None:
+        # build altnames (IP or DNS), email and uri aren't allowed
+        alts = []
+        for alt in altnames:
+            if re.match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', alt) or re.match('^[0-9a-fA-F:]+', alt):
+                ip = ipaddress.ip_address(alt)
+                alts.append(x509.IPAddress(ip))
+            else:
+                alts.append(x509.DNSName(alt))
         csr = csr.add_extension(
-            x509.SubjectAlternativeName(
-                [x509.DNSName(domain) for domain in altnames]),
+            x509.SubjectAlternativeName(alts),
             critical=False,
         )
     csr = csr.sign(key, hashes.SHA256(), default_backend())
