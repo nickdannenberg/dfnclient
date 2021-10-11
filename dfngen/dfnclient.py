@@ -100,12 +100,6 @@ def create_cert(fqdn, pin, applicant, mail, config, additional, requestnumber, c
 @cli.command("csr", help="Generate a certificate for an existing certificate (for FQDN with key stored in PATH).")
 @click.argument("fqdn")
 @click.argument("path", type=click.Path(exists=True))
-@click.option("--applicant",
-              type=str,
-              help="Name of the applicant, defaults to value in config")
-@click.option("--mail",
-              type=str,
-              help="Applicant email, defaults to value in config")
 @click.option(
     "--pin",
     "-p",
@@ -115,6 +109,12 @@ def create_cert(fqdn, pin, applicant, mail, config, additional, requestnumber, c
     type=str,
     help="Applicant code pin, will be prompted if not provided",
 )
+@click.option("--applicant",
+              type=str,
+              help="Name of the applicant, defaults to value in config")
+@click.option("--mail",
+              type=str,
+              help="Applicant email, defaults to value in config")
 @click.option(
     "-c",
     "--config",
@@ -143,7 +143,7 @@ def create_cert(fqdn, pin, applicant, mail, config, additional, requestnumber, c
     type=str,
     help="Certificate profile, e.g. Web Server, LDAP Server"
 )
-def gen_existing(fqdn, pin, applicant, mail, config, path, additional, requestnumber, cert_profile):
+def gen_existing(fqdn, path, pin, applicant, mail, config, additional, requestnumber, cert_profile):
     (fqdn, pin, conf) = _gen_csr_common(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile)
 
     print("Checking key")
@@ -238,7 +238,7 @@ def send_pdf(pdf, config):
         send_from = send_to
     if 'fqdn' in conf:
         # conf is a config for this host
-        subj = f'DFN-PKI Certificate request for {fqdn}'
+        subj = f'DFN-PKI Certificate request for {conf["fqdn"]}'
         text = 'Please send sign this certificate request and send it to your CA.' \
             f'Hostname: {conf["fqdn"]}' \
             f'PIN: {conf["pin"]}' \
@@ -315,7 +315,7 @@ def _gen_csr_common(fqdn, pin, applicant, mail, config, additional, requestnumbe
     conf["subject"]["cn"] = conf["subject"]["cn"].format(**conf)
     conf["altnames"] = []
     for alt in additional:
-        if re.match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', alt) or re.match('^[0-9a-fA-F:]+', alt):
+        if re.match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', alt) or re.match('^[0-9a-fA-F:]+$', alt):
             conf['altnames'].append('IP:{}'.format(alt))
         else:
             conf['altnames'].append('DNS:{}'.format(alt))

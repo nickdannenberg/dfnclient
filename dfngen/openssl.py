@@ -65,7 +65,7 @@ def generate_csr(key, fqdn, subject, altnames=None):
         # build altnames (IP or DNS), email and uri aren't allowed
         alts = []
         for alt in altnames:
-            if re.match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', alt) or re.match('^[0-9a-fA-F:]+', alt):
+            if re.match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', alt) or re.match('^[0-9a-fA-F:]+$', alt):
                 ip = ipaddress.ip_address(alt)
                 alts.append(x509.IPAddress(ip))
             else:
