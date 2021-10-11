@@ -94,11 +94,7 @@ def create_cert(fqdn, pin, applicant, mail, config, additional, requestnumber, c
     req = openssl.gen_csr_with_new_cert(conf["fqdn"], conf["subject"],
                                         conf["password"], additional)
 
-    soap.submit_request(req, onlyreqnumber=requestnumber, **conf)
-    if not requestnumber:
-        print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
-    with open("{}.conf".format(fqdn), "w") as f:
-        f.write(json.dumps(conf, sort_keys=True, indent=4))
+    _submit_to_ca( req, onlyreqnumber=requestnumber, **conf)
 
 
 @cli.command("csr", help="Generate a certificate for an existing certificate (for FQDN with key stored in PATH).")
@@ -169,9 +165,7 @@ def gen_existing(fqdn, pin, applicant, mail, config, path, additional, requestnu
         additional=additional,
     )
 
-    soap.submit_request(req, onlyreqnumber=requestnumber, **conf)
-    if not requestnumber:
-        print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
+    _submit_to_ca( req, onlyreqnumber=requestnumber, **conf)
 
 
 @cli.command("submit", help="(Re)submit an existing certificate request (stored in CSR)")
@@ -216,10 +210,8 @@ def submit_csr(csr, pin, applicant, mail, config, requestnumber, cert_profile):
     (fqdn, additional, req) = openssl.data_from_csr(csr)
     (fqdn, pin, conf) = _prepare_common_args(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile)
     conf['altnames'] = additional
+    _submit_to_ca( req, onlyreqnumber=requestnumber, **conf)
 
-    soap.submit_request(req, onlyreqnumber=requestnumber, **conf)
-    if not requestnumber:
-        print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
 
 
 @cli.command("config", help="Creates or edits the default config file")
@@ -281,6 +273,16 @@ def _gen_csr_common(fqdn, pin, applicant, mail, config, additional, requestnumbe
     click.confirm("Are these values correct?", default=True, abort=True)
 
     return (fqdn, pin, conf)
+
+def _submit_to_ca( req, onlyreqnumber, **conf):
+    req_serial = soap.submit_request(req, onlyreqnumber=onlyreqnumber, **conf)
+    conf['req_serial'] = req_serial
+    fqdn = conf['fqdn']
+    if not onlyreqnumber:
+        print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
+    with open("{}.conf".format(fqdn), "w") as f:
+        f.write(json.dumps(conf, sort_keys=True, indent=4))
+    return conf
 
 
 def config_edit():
