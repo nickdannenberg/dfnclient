@@ -242,13 +242,29 @@ def send_pdf(pdf, config):
         text = 'Please send sign this certificate request and send it to your CA.' \
             f'Hostname: {conf["fqdn"]}' \
             f'PIN: {conf["pin"]}' \
-            f'Serial: {conf["req_serial"]}'
+            f'Serial: {conf["serial"]}'
     else:
         subj = 'DFN-PKI Certificate request'
         text = 'Please send sign this certificate request and send it to your CA.'
     use_sendmail = conf['use_sendmail'] if 'use_sendmail' in conf else 1
     mailserver = conf['mailserver'] if 'mailserver' in conf else 'localhost'
     mail.send_mail(send_to, send_from, subj, text, files=[pdf], use_sendmail=use_sendmail, server=mailserver )
+
+
+@cli.command("download", help="Download certificate for outstanding certificate request")
+@click.argument("config", type=click.Path(exists=True))
+def download_cert(config):
+    if(isinstance(config, dict)):
+        conf = config
+    else:
+        conf = parse_config(config)
+    fqdn = conf['fqdn']
+    data = soap.download_certificate(**conf)
+    if data:
+        with open(f'{fqdn}.pem', 'w') as f:
+            f.write(data)
+        return True
+    return False
 
 
 @cli.command("config", help="Creates or edits the default config file")
@@ -315,7 +331,7 @@ def _gen_csr_common(fqdn, pin, applicant, mail, config, additional, requestnumbe
 
 def _submit_to_ca( req, onlyreqnumber, **conf):
     req_serial = soap.submit_request(req, onlyreqnumber=onlyreqnumber, **conf)
-    conf['req_serial'] = req_serial
+    conf['serial'] = req_serial
     fqdn = conf['fqdn']
     if not onlyreqnumber:
         print("Generated pdf at:", colored("{}.pdf".format(fqdn)))

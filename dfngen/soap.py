@@ -4,6 +4,13 @@ from hashlib import sha1
 
 from base64 import b64decode
 
+def soap_client(testserver, soap_url):
+    if testserver:
+        soap_url = 'https://pki.pca.dfn.de/test-eins-ca/cgi-bin/pub/soap?wsdl=1'
+    else:
+        if not(soap_url):
+            soap_url = 'https://pki.pca.dfn.de/dfn-ca-global-g2/cgi-bin/pub/soap?wsdl=1'
+    return Client(soap_url)
 
 def submit_request(req,
                    fqdn,
@@ -19,12 +26,7 @@ def submit_request(req,
                    soap_url=None,
                    **kwargs):
     pin_hashed = sha1(str(pin).encode()).hexdigest()
-    if testserver:
-        soap_url = 'https://pki.pca.dfn.de/test-eins-ca/cgi-bin/pub/soap?wsdl=1'
-    else:
-        if not(soap_url):
-            soap_url = 'https://pki.pca.dfn.de/dfn-ca-global-g2/cgi-bin/pub/soap?wsdl=1'
-    cl = Client(soap_url)
+    cl = soap_client(testserver, soap_url)
     alt_type = cl.factory.create('ArrayOfString')
     alt_type._arrayType = "ns0:string[1]"
     alt_type.item = altnames
@@ -49,3 +51,14 @@ def submit_request(req,
     with open('{}.pdf'.format(fqdn), 'wb') as f:
         f.write(b64decode(pdf))
     return req_number
+
+
+def download_certificate(fqdn, serial, pin, raid, testserver, soap_url = None, **args):
+    pin_hashed = sha1(str(pin).encode()).hexdigest()
+    cl = soap_client(testserver, soap_url)
+    cert_data = cl.service.getCertificateByRequestSerial(RaID=raid,
+                                                         Serial=serial,
+                                                         Pin=pin_hashed)
+    return cert_data
+
+
