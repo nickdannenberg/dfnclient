@@ -80,7 +80,7 @@ def cli():
     help="Certificate profile, e.g. Web Server, LDAP Server"
 )
 def create_cert(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile):
-    (fqdn, pin, conf) = _gen_csr_common(fqdn, pin, applicant, config, additional, requestnumber, cert_profile)
+    (fqdn, pin, conf) = _gen_csr_common(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile)
     if conf["use_password"]:
         conf["password"] = click.prompt(
             colored("Enter a certificate password", "yellow"),
