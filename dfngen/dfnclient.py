@@ -7,7 +7,7 @@ from termcolor import colored, cprint
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 
-from dfngen import openssl, soap
+from dfngen import openssl, soap, mail
 import re
 
 APP_NAME = "dfnclient"
@@ -213,6 +213,43 @@ def submit_csr(csr, pin, applicant, mail, config, requestnumber, cert_profile):
     _submit_to_ca( req, onlyreqnumber=requestnumber, **conf)
 
 
+@cli.command("send", help="Send certificate request PDF via email")
+@click.argument("PDF", type=click.Path(exists=True))
+@click.option(
+    "-c",
+    "--config",
+    type=click.Path(),
+    help="Path to config",
+    # show_default=True,
+    default=Path(click.get_app_dir(APP_NAME)) / "config.json",
+)
+def send_pdf(pdf, config):
+    if not(config):
+        raise Exception("config empty")
+    if(isinstance(config, dict)):
+        conf = config
+    else:
+        print(f"Parsing config: {config}")
+        conf = parse_config(config)
+    send_to = conf['mail']
+    try:
+        send_from = conf['mail_from']
+    except:
+        send_from = send_to
+    if 'fqdn' in conf:
+        # conf is a config for this host
+        subj = f'DFN-PKI Certificate request for {fqdn}'
+        text = 'Please send sign this certificate request and send it to your CA.' \
+            f'Hostname: {conf["fqdn"]}' \
+            f'PIN: {conf["pin"]}' \
+            f'Serial: {conf["req_serial"]}'
+    else:
+        subj = 'DFN-PKI Certificate request'
+        text = 'Please send sign this certificate request and send it to your CA.'
+    use_sendmail = conf['use_sendmail'] if 'use_sendmail' in conf else 1
+    mailserver = conf['mailserver'] if 'mailserver' in conf else 'localhost'
+    mail.send_mail(send_to, send_from, subj, text, files=[pdf], use_sendmail=use_sendmail, server=mailserver )
+
 
 @cli.command("config", help="Creates or edits the default config file")
 def create_config():
@@ -246,7 +283,9 @@ def _prepare_common_args(fqdn, pin, applicant, mail, config, additional, request
             conf["mail"] = click.prompt(
                 "No Applicant mail provided, please enter")
     conf["fqdn"] = fqdn
-    conf["pin"] = pin
+    # FIXME: bug, if pin is in conf but not given on the command line, it will be unset here
+    if pin:
+        conf["pin"] = pin
     if cert_profile:
         conf["profile"] = cert_profile
     elif not "profile" in conf:
