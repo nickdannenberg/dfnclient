@@ -10,6 +10,11 @@ from cryptography.hazmat.backends import default_backend
 from dfngen import openssl, soap, mail
 import re
 
+import datetime
+import time
+from random import choice
+from string import ascii_uppercase, digits
+
 APP_NAME = "dfnclient"
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 
@@ -90,7 +95,7 @@ def create_cert(fqdn, pin, applicant, mail, config, additional, requestnumber, c
     else:
         conf["password"] = None
 
-    print("Generating private key and certificate signing request")
+    say("Generating private key and certificate signing request")
     req = openssl.gen_csr_with_new_cert(conf["fqdn"], conf["subject"],
                                         conf["password"], additional)
 
@@ -146,7 +151,7 @@ def create_cert(fqdn, pin, applicant, mail, config, additional, requestnumber, c
 def gen_existing(fqdn, path, pin, applicant, mail, config, additional, requestnumber, cert_profile):
     (fqdn, pin, conf) = _gen_csr_common(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile)
 
-    print("Checking key")
+    say("Checking key")
     with open(path, "rb") as f:
         try:
             serialization.load_pem_private_key(f.read(), None,
@@ -156,7 +161,7 @@ def gen_existing(fqdn, path, pin, applicant, mail, config, additional, requestnu
                                     hide_input=True).encode()
         else:
             conf["password"] = None
-    print("Generating certificate signing request")
+    say("Generating certificate signing request")
     req = openssl.gen_csr_with_existing_cert(
         path,
         conf["fqdn"],
@@ -289,6 +294,122 @@ def download_cert(config):
     return False
 
 
+@cli.command("autorenew", help="""Automatically renew certificate for FQDN.
+
+When available, will use an existing CSR (so no access to the private
+key is required). Otherwise, falls back to generating a new CSR from
+an existing private key. To create a new private key, use the "create"
+subcommand.
+
+After submitting the CSR, the generated PDF, serial number and PIN
+will be sent to the applicant's email address. FIXME: Is it a good
+idea to send the PIN via email? This allows whoever gets access to the
+email to revoke the certificate.
+
+If a file FQDN.conf is present in the current directory, and it is
+newer than the certificate, try to load FQDN.conf and download a new
+certificate.
+    """)
+@click.argument("fqdn", type=str)
+@click.option(
+    "--min-valid-days",
+    type=click.INT,
+    help="Renew the certificate N days before expiry. defaults to 30"
+)
+@click.option(
+    "--mail-to",
+    help="E-Mail recipient address, defaults to applicant email"
+)
+@click.option(
+    "--mail-from",
+    help="E-Mail sender address, defaults to recipient email"
+)
+@click.option(
+    "--use-smtp",
+    default=False,
+    is_flag=True,
+    help="Use SMTP to send mail, defaults to off to use sendmail"
+)
+@click.option(
+    "--mail-server",
+    help="SMTP server to use, defaults to localhost"
+)
+def autorenew(fqdn, min_valid_days, mail_to, mail_from, use_smtp, mail_server):
+    cert_path = Path(f"{fqdn}.pem")
+    cfg_path = Path(f"{fqdn}.conf")
+    pdf_path = Path(f"{fqdn}.pdf")
+    if cfg_path.exists() and (not(cert_path.exists()) or
+                              (cert_path.exists() and
+                               cert_path.lstat().st_mtime < cfg_path.lstat().st_mtime)):
+        #print('Try to download new certificate')
+        ret = download_cert.callback(cfg_path)
+        if ret:
+            pdf_path.unlink()
+            say('Downloaded new certificate')
+            return True
+        else:
+            say('Could not download new certificate')
+            return False
+    else:
+        cert_data = None
+        if not(cfg_path and cfg_path.exists()) :
+            # load default config
+            cfg_path = Path(click.get_app_dir(APP_NAME)) / "config.json"
+        conf = parse_config(cfg_path)
+        if not(min_valid_days):
+            try:
+                min_valid_days = conf['min_valid_days']
+            except:
+                min_valid_days = 30
+        conf['min_valid_days'] = min_valid_days
+
+        if not(cert_path.exists()):
+            say('No certificate -> request a new one')
+        else:
+            say('check if certificate should be renewed')
+            cert_data = openssl.data_from_cert(cert_path)
+            now = datetime.datetime.fromtimestamp(time.time())
+            remaining = cert_data['not_valid_after'] - now
+            if remaining.days <= min_valid_days:
+                say(f'Only {remaining.days} days left, requesting new certificate')
+            else:
+                say(f'Certificate still valid for {remaining.days} days, NOT requesting new certificate')
+                return True
+
+        conf['fqdn'] = fqdn
+        conf['config'] = cfg_path
+        conf['batch'] = True
+        if not('pin' in conf):
+            conf['pin'] = generate_pin()
+        req_path = Path(f'{fqdn}.req')
+        key_path = Path(f'{fqdn}.key')
+        if req_path.exists():
+            say('CSR exists, sending again')
+            conf['serial'] = submit_csr.callback( req_path, conf['pin'], conf['applicant'], conf['mail'], conf, 0, conf['profile'] )
+        elif key_path.exists():
+            say('No CSR found, generating new one for private key')
+            conf['additional'] = []
+            if cert_data and 'additional' in cert_data:
+                conf['additional'] = [s.split(':')[1] for s in cert_data['additional'] if s.find(':')>-1]
+            conf['serial'] = gen_existing.callback( fqdn, key_path, conf['pin'], conf['applicant'], conf['mail'], conf, conf['additional'], 0, conf['profile'])
+        else:
+            print('Neither CSR nor key found, cannot continue')
+            return False
+
+        if not(mail_to):
+            try:
+                mail_to = conf['mail_to']
+            except:
+                mail_to = conf['mail']
+        if not(mail_from):
+            try:
+                mail_from = conf['mail_from']
+            except:
+                mail_from = mail_to
+
+        return send_pdf.callback(pdf_path, mail_from, mail_to, use_smtp, mail_server, conf)
+
+
 @cli.command("config", help="Creates or edits the default config file")
 def create_config():
     config_edit()
@@ -298,8 +419,11 @@ def create_config():
 # Helper Methods
 def _prepare_common_args(fqdn, pin, applicant, mail, config, additional, requestnumber, cert_profile):
     "Common parsing/preparation code for all commands"
-    print("Using config: ", colored("{}".format(config), "blue"))
-    conf = parse_config(config)
+    if(isinstance(config, dict)):
+        conf = config
+    else:
+        print("Using config: ", colored("{}".format(config), "blue"))
+        conf = parse_config(config)
     check_conf(conf)
     if not "fqdn" in conf and fqdn is None:
         fqdn = click.prompt("Primary FQDN", type=str)
@@ -342,12 +466,13 @@ def _gen_csr_common(fqdn, pin, applicant, mail, config, additional, requestnumbe
         else:
             conf['altnames'].append('DNS:{}'.format(alt))
 
-    print("Generating certificate signing request with the following values:\n")
-    for key, value in conf.items():
-        if key in ('pin','password'):
-            pass
-        cprint("{}: {}".format(key, value), "yellow")
-    click.confirm("Are these values correct?", default=True, abort=True)
+    if 'batch' in conf and not(conf['batch']):
+        print("Generating certificate signing request with the following values:\n")
+        for key, value in conf.items():
+            if key in ('pin','password'):
+                pass
+            cprint("{}: {}".format(key, value), "yellow")
+        click.confirm("Are these values correct?", default=True, abort=True)
 
     return (fqdn, pin, conf)
 
@@ -356,11 +481,21 @@ def _submit_to_ca( req, onlyreqnumber, **conf):
     conf['serial'] = req_serial
     fqdn = conf['fqdn']
     if not onlyreqnumber:
-        print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
+        if 'batch' in conf and not(conf['batch']):
+            print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
     with open("{}.conf".format(fqdn), "w") as f:
         f.write(json.dumps(conf, sort_keys=True, indent=4))
     return conf
 
+pin_chars = digits + ascii_uppercase
+def generate_pin(length=9):
+    "Generate a random PIN"
+    return ''.join(choice(pin_chars) for i in range(length))
+
+def say(msg):
+    # FIXME: make printing configurable
+    if 0:
+        print(msg)
 
 def config_edit():
     config_directory = Path(click.get_app_dir(APP_NAME))

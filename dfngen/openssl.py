@@ -93,3 +93,21 @@ def data_from_csr(csr_path):
 
          return (fqdn, altnames, request.public_bytes(serialization.Encoding.PEM).decode())
 
+def data_from_cert(cert_path):
+    "Read fqdn, altnames and enddate from certificate"
+    with open(cert_path, 'rb') as f:
+        cert = x509.load_pem_x509_certificate(f.read(), default_backend())
+    if not(cert):
+        raise Exception(f'could not read certificate from file "{cert_path}"')
+
+    fqdn = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+    ext_altname = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    altnames = [f'DNS:{n}' for n in ext_altname.get_values_for_type(x509.DNSName)]
+    altnames.extend( [f'IP:{n}' for n in ext_altname.get_values_for_type(x509.IPAddress)])
+    start = cert.not_valid_before
+    end = cert.not_valid_after
+    return { 'fqdn': fqdn,
+             'additional': altnames,
+             'not_valid_before': start,
+             'not_valid_after': end
+            }
