@@ -216,6 +216,24 @@ def submit_csr(csr, pin, applicant, mail, config, requestnumber, cert_profile):
 @cli.command("send", help="Send certificate request PDF via email")
 @click.argument("PDF", type=click.Path(exists=True))
 @click.option(
+    "--mail-to",
+    help="E-Mail recipient address, defaults to applicant email"
+)
+@click.option(
+    "--mail-from",
+    help="E-Mail sender address, defaults to recipient email"
+)
+@click.option(
+    "--use-smtp",
+    default=False,
+    is_flag=True,
+    help="Use SMTP to send mail, defaults to off to use sendmail"
+)
+@click.option(
+    "--mail-server",
+    help="SMTP server to use, defaults to localhost"
+)
+@click.option(
     "-c",
     "--config",
     type=click.Path(),
@@ -223,32 +241,36 @@ def submit_csr(csr, pin, applicant, mail, config, requestnumber, cert_profile):
     # show_default=True,
     default=Path(click.get_app_dir(APP_NAME)) / "config.json",
 )
-def send_pdf(pdf, config):
+def send_pdf(pdf, mail_from, mail_to, use_smtp, mail_server, config):
     if not(config):
         raise Exception("config empty")
     if(isinstance(config, dict)):
         conf = config
     else:
-        print(f"Parsing config: {config}")
         conf = parse_config(config)
-    send_to = conf['mail']
-    try:
-        send_from = conf['mail_from']
-    except:
-        send_from = send_to
+    if not(mail_to):
+        try:
+            mail_to = conf['mail_to']
+        except:
+            mail_to = conf['mail']
+    if not(mail_from):
+        try:
+            mail_from = conf['mail_from']
+        except:
+            mail_from = mail_to
     if 'fqdn' in conf:
         # conf is a config for this host
         subj = f'DFN-PKI Certificate request for {conf["fqdn"]}'
-        text = 'Please send sign this certificate request and send it to your CA.' \
-            f'Hostname: {conf["fqdn"]}' \
-            f'PIN: {conf["pin"]}' \
-            f'Serial: {conf["serial"]}'
+        text = 'Please send sign this certificate request and send it to your CA.\n' \
+            f'Hostname: {conf["fqdn"]}\n' \
+            f'PIN: {conf["pin"]}\n' \
+            f'Serial: {conf["serial"]}\n'
     else:
         subj = 'DFN-PKI Certificate request'
         text = 'Please send sign this certificate request and send it to your CA.'
     use_sendmail = conf['use_sendmail'] if 'use_sendmail' in conf else 1
     mailserver = conf['mailserver'] if 'mailserver' in conf else 'localhost'
-    mail.send_mail(send_to, send_from, subj, text, files=[pdf], use_sendmail=use_sendmail, server=mailserver )
+    mail.send_mail(mail_to, mail_from, subj, text, files=[pdf], use_sendmail=not(use_smtp), server=mail_server )
 
 
 @cli.command("download", help="Download certificate for outstanding certificate request")
