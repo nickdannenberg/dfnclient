@@ -61,19 +61,22 @@ def generate_csr(key, fqdn, subject, altnames=None):
     subj.append(x509.NameAttribute(NameOID.COMMON_NAME, subject['cn']))
 
     csr = x509.CertificateSigningRequestBuilder().subject_name(x509.Name(subj))
-    if altnames != None:
-        # build altnames (IP or DNS), email and uri aren't allowed
-        alts = []
-        for alt in altnames:
-            if re.match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', alt) or re.match('^[0-9a-fA-F:]+$', alt):
-                ip = ipaddress.ip_address(alt)
-                alts.append(x509.IPAddress(ip))
-            else:
-                alts.append(x509.DNSName(alt))
-        csr = csr.add_extension(
-            x509.SubjectAlternativeName(alts),
-            critical=False,
-        )
+    if not(altnames):
+        altnames = [subject['cn']]
+    elif not(subject['cn'] in altnames):
+        altnames.append(subject['cn'])
+    # build altnames (IP or DNS), email and uri aren't allowed
+    alts = []
+    for alt in altnames:
+        if re.match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', alt) or re.match('^[0-9a-fA-F:]+$', alt):
+            ip = ipaddress.ip_address(alt)
+            alts.append(x509.IPAddress(ip))
+        else:
+            alts.append(x509.DNSName(alt))
+    csr = csr.add_extension(
+        x509.SubjectAlternativeName(alts),
+        critical=False,
+    )
     csr = csr.sign(key, hashes.SHA256(), default_backend())
     with open('{}.req'.format(fqdn), 'wb') as f:
         f.write(csr.public_bytes(serialization.Encoding.PEM))
