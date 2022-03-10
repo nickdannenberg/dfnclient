@@ -334,7 +334,14 @@ certificate.
     "--mail-server",
     help="SMTP server to use, defaults to localhost"
 )
-def autorenew(fqdn, min_valid_days, mail_to, mail_from, use_smtp, mail_server):
+@click.option(
+    "--additional",
+    "-a",
+    multiple=True,
+    help=
+    "Altnames for the certificate, provide multiple times for multiple entries",
+)
+def autorenew(fqdn, min_valid_days, mail_to, mail_from, use_smtp, mail_server, additional):
     cert_path = Path(f"{fqdn}.pem")
     cfg_path = Path(f"{fqdn}.conf")
     pdf_path = Path(f"{fqdn}.pdf")
@@ -377,7 +384,12 @@ def autorenew(fqdn, min_valid_days, mail_to, mail_from, use_smtp, mail_server):
                 return True
 
         conf['fqdn'] = fqdn
-        conf['config'] = cfg_path
+        if additional:
+            conf['additional'] = additional
+        else:
+            if not('additional') in conf:
+                conf['additional'] = [fqdn]
+        conf['config'] = str(cfg_path)
         conf['batch'] = True
         if not('pin' in conf):
             conf['pin'] = generate_pin()
@@ -481,7 +493,7 @@ def _submit_to_ca( req, onlyreqnumber, **conf):
     conf['serial'] = req_serial
     fqdn = conf['fqdn']
     if not onlyreqnumber:
-        if 'batch' in conf and not(conf['batch']):
+        if not('batch' in conf) or not(conf['batch']):
             print("Generated pdf at:", colored("{}.pdf".format(fqdn)))
     with open("{}.conf".format(fqdn), "w") as f:
         f.write(json.dumps(conf, sort_keys=True, indent=4))
