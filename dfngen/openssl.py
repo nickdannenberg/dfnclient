@@ -64,7 +64,7 @@ def generate_csr(key, fqdn, subject, altnames=None):
     if not(altnames):
         altnames = [subject['cn']]
     elif not(subject['cn'] in altnames):
-        altnames.append(subject['cn'])
+        altnames = list(altnames) + [subject['cn'],]
     # build altnames (IP or DNS), email and uri aren't allowed
     alts = []
     for alt in altnames:
